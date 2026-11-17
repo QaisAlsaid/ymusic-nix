@@ -129,11 +129,15 @@ stdenv.mkDerivation {
   '';
 
   # The AppImage normally relies on the host loader at /lib64/ and on
-  # LD_LIBRARY_PATH set by its runtime; on NixOS both must be replaced:
-  #  - point the interpreter at the Nix glibc loader
-  #  - make the bundled libav libs and the dlopen()ed system libs
-  #    resolvable through absolute RUNPATHs
-  preFixup = ''
+  # LD_LIBRARY_PATH set by its runtime; on NixOS both must be replaced.
+  # This runs in postFixup ON PURPOSE: stdenv's fixupPhase ends with
+  # `patchelf --shrink-rpath`, which prunes every RUNPATH entry that no
+  # DT_NEEDED library resolves from. That is correct for linked libraries,
+  # but it deletes the directories only dlopen() (Wayland, EGL/GL, glib,
+  # PulseAudio, libsecret) ever resolves from - which is exactly what
+  # surfaced at runtime as "The wayland library could not be loaded".
+  # postFixup runs after the shrink, so these RUNPATHs stay intact.
+  postFixup = ''
     patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" \
       $out/opt/ymusic/usr/bin/YMusic \
       $out/opt/ymusic/usr/bin/ffmpeg
