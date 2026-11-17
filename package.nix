@@ -2,6 +2,7 @@
   lib,
   stdenv,
   fetchurl,
+  appimageTools,
   copyDesktopItems,
   makeDesktopItem,
   patchelf,
@@ -34,6 +35,7 @@ let
     zlib
     libxcb
     stdenv.cc.cc
+    stdenv.cc.libc
   ];
 
   # The bundled libav libraries have libz.so.1 in their NEEDED
@@ -41,20 +43,37 @@ let
   # ffmpeg binary does too. Normal distros provide zlib from the host;
   # NixOS does not. DT_RUNPATH is NOT transitive, so every bundled lib
   # must carry these dirs in its own rpath - YMusic's rpath cannot
-  # satisfy them.
+  # satisfy them. libc/libm are carried the same way nixpkgs binaries
+  # carry glibc in their own RUNPATH.
   bundledRpath = lib.makeLibraryPath [
     zlib
     stdenv.cc.cc
+    stdenv.cc.libc
   ];
+
+  appimage = fetchurl (
+    release.sources.${stdenv.hostPlatform.system}
+      or (throw "YMusic has no AppImage for ${stdenv.hostPlatform.system}")
+  );
+
+  # Extract the AppImage WITHOUT executing it. The type-2 runtime refuses
+  # to start inside the Nix build sandbox (execve fails there), so running
+  # `--appimage-extract` is not an option. appimageTools.extract locates
+  # the embedded squashfs image from the ELF header offset and unpacks it
+  # with unsquashfs instead - exactly what nixpkgs' appimage packaging
+  # uses. The result is the plain AppDir: usr/bin/YMusic, usr/bin/ffmpeg,
+  # usr/lib/libav*.so, the desktop file and icons.
+  appdir = appimageTools.extract {
+    pname = "ymusic";
+    inherit version;
+    src = appimage;
+  };
 in
 stdenv.mkDerivation {
   pname = "ymusic";
   inherit version;
 
-  src = fetchurl (
-    release.sources.${stdenv.hostPlatform.system}
-      or (throw "YMusic has no AppImage for ${stdenv.hostPlatform.system}")
-  );
+  src = appdir;
 
   nativeBuildInputs = [
     copyDesktopItems
@@ -74,15 +93,13 @@ stdenv.mkDerivation {
     libxcb
   ];
 
-  # No build from source needed: the official AppImage ships the app,
-  # a self-contained ffmpeg build and all libav libs. Its type-2 runtime
-  # has a built-in --appimage-extract mode that needs no FUSE.
+  # No build from source needed: the official AppImage ships the app, a
+  # self-contained ffmpeg build and all libav libs, and appimageTools
+  # (via src) already unpacked it. Just copy the AppDir in and make the
+  # tree writable.
   unpackPhase = ''
     runHook preUnpack
-    cp $src ./ymusic.AppImage
-    chmod +x ./ymusic.AppImage
-    ./ymusic.AppImage --appimage-extract >/dev/null
-    mv squashfs-root ymusic
+    cp -r $src ymusic
     chmod -R u+w ymusic
     runHook postUnpack
   '';
