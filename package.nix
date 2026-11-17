@@ -20,6 +20,9 @@ let
   release = import ./version.nix;
   inherit (release) version;
 
+  # System libs the YMusic binary links against or dlopen()s at runtime
+  # (X11/XWayland via xcb, Wayland, EGL, PulseAudio audio output,
+  # libsecret credential storage backed by glib).
   ymusicRpath = lib.makeLibraryPath [
     glib
     libGL
@@ -33,7 +36,13 @@ let
     stdenv.cc.cc
   ];
 
-  ffmpegRpath = lib.makeLibraryPath [
+  # The bundled libav libraries have libz.so.1 in their NEEDED
+  # (libavcodec, libavformat, libavutil, libswscale), and the bundled
+  # ffmpeg binary does too. Normal distros provide zlib from the host;
+  # NixOS does not. DT_RUNPATH is NOT transitive, so every bundled lib
+  # must carry these dirs in its own rpath - YMusic's rpath cannot
+  # satisfy them.
+  bundledRpath = lib.makeLibraryPath [
     zlib
     stdenv.cc.cc
   ];
@@ -104,11 +113,11 @@ stdenv.mkDerivation {
     patchelf --set-rpath "$out/opt/ymusic/usr/lib:${ymusicRpath}" \
       $out/opt/ymusic/usr/bin/YMusic
 
-    patchelf --set-rpath "$out/opt/ymusic/usr/lib:${ffmpegRpath}" \
+    patchelf --set-rpath "$out/opt/ymusic/usr/lib:${bundledRpath}" \
       $out/opt/ymusic/usr/bin/ffmpeg
 
     for f in $out/opt/ymusic/usr/lib/*.so.*; do
-      patchelf --set-rpath "$out/opt/ymusic/usr/lib" "$f"
+      patchelf --set-rpath "$out/opt/ymusic/usr/lib:${bundledRpath}" "$f"
     done
   '';
 
