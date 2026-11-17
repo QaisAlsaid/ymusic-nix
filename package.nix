@@ -5,9 +5,11 @@
   appimageTools,
   copyDesktopItems,
   makeDesktopItem,
+  makeWrapper,
   patchelf,
   glib,
   libGL,
+  libffi,
   libsecret,
   libxkbcommon,
   mesa,
@@ -27,6 +29,7 @@ let
   ymusicRpath = lib.makeLibraryPath [
     glib
     libGL
+    libffi
     libsecret
     libxkbcommon
     mesa
@@ -77,12 +80,14 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [
     copyDesktopItems
+    makeWrapper
     patchelf
   ];
 
   buildInputs = [
     glib
     libGL
+    libffi
     libsecret
     libxkbcommon
     mesa
@@ -110,7 +115,13 @@ stdenv.mkDerivation {
     cp -r ymusic/. $out/opt/ymusic/
 
     mkdir -p $out/bin
-    ln -s $out/opt/ymusic/usr/bin/YMusic $out/bin/ymusic
+    # gpui (the UI framework) dlopen()s Wayland (and EGL) libraries at
+    # runtime; dlopen'ed libraries are invisible to RUNPATH-based link
+    # resolution, and the wayland package's unversioned .so symlinks live
+    # in its dev output. LD_LIBRARY_PATH is consulted first for every
+    # dlopen, whatever the nixpkgs snapshot's output layout is.
+    makeWrapper $out/opt/ymusic/usr/bin/YMusic $out/bin/ymusic \
+      --prefix LD_LIBRARY_PATH : "$out/opt/ymusic/usr/lib:$ymusicRpath:$bundledRpath:${lib.getDev wayland}/lib"
 
     install -Dm644 ymusic/io.ymusic.YMusic.png \
       $out/share/pixmaps/ymusic.png
